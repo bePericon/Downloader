@@ -10,82 +10,87 @@ using System.Windows.Forms;
 using System.IO;
 using System.Threading;
 using System.Net;
+using System.Diagnostics;
 
 namespace Downloader
 {
     public partial class DownloaderWindow : Form
     {
-        private Thread thrDownload;
-        private Stream strResponse;
-        private Stream strLocal;
-        private HttpWebRequest webRequest;
-        private HttpWebResponse webResponse;
-        private delegate void UpdateProgressCallback(Int64 bytesRead, Int64 totalBytes);
-        private static int PercentProgress;
+        WebClient webClient = new WebClient();
+        Stopwatch sw = new Stopwatch();
+        string fileName = null;
 
         public DownloaderWindow()
         {
             InitializeComponent();
         }
-        
-        private void DownloaderWindow_Load(object sender, EventArgs e)
-        {
 
+        protected override void OnLoad(EventArgs e)
+        {
+            webClient.DownloadProgressChanged += new DownloadProgressChangedEventHandler(UpdateProgress);
+            webClient.DownloadFileCompleted += new AsyncCompletedEventHandler(Downloader);
+
+            base.OnLoad(e);
         }
 
-        private void UpdateProgress(Int64 bytesRead, Int64 totalBytes)
+        private void UpdateProgress(object sender, DownloadProgressChangedEventArgs e)
         {
-            PercentProgress = Convert.ToInt32((bytesRead * 100) / totalBytes);
-            this.progressBar.Value = PercentProgress;
-            txtProgress.Text = "Descargando " + bytesRead + " de " + totalBytes + " (" + PercentProgress + "%)";
+            string bytesRead = (e.BytesReceived / 1024d / 1024d).ToString("0.00");
+            string totalBytes = (e.TotalBytesToReceive / 1024d / 1024d).ToString("0.00");
+            string bytes = string.Format("{0} MB's / {1} MB's", bytesRead, totalBytes);
+            //string speed = string.Format("{0} kb/s", (e.BytesReceived / 1024d / sw.Elapsed.TotalSeconds).ToString("0.00"));
+            int percentage = e.ProgressPercentage;
+
+            pbProgress.Value = percentage;
+            txtProgress.Text = "Descargando " + percentage.ToString() + " %" + " - " + bytes;// + " - " + speed;
         }
 
-        private void Download()
+        private void Downloader(object sender, AsyncCompletedEventArgs e)
         {
-            using(WebClient wcDownload = new WebClient())
+            sw.Reset();
+            pbProgress.Value = 0;
+            txtProgress.Text = "0%";
+            if (e.Cancelled == true)
             {
-                try
+                MessageBox.Show("La descarga ha sido cancelada!");
+            }
+            else
+            {
+                if (MessageBox.Show("¿Desea abrir el archivo descargado?", "Archivo Descargado", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
                 {
-                    webRequest = (HttpWebRequest)WebRequest.Create(this.txtURL.Text);
-                    webRequest.Credentials = CredentialCache.DefaultCredentials;
-                    webResponse = (HttpWebResponse)webRequest.GetResponse();
-                    Int64 fileSize = webResponse.ContentLength;
-                    strResponse = wcDownload.OpenRead(this.txtURL.Text);
-                    strLocal = new FileStream(this.txtNombreArchivo.Text, FileMode.Create, FileAccess.Write, FileShare.None);
-                    int bytesSize = 0;
-                    byte[] downBuffer = new byte[2048];
-
-                    while((bytesSize = strResponse.Read(downBuffer, 0, downBuffer.Length)) > 0)
-                    {
-                        strLocal.Write(downBuffer, 0, bytesSize);
-                        this.Invoke(new UpdateProgressCallback(this.UpdateProgress), new object[] { strLocal.Length, fileSize });
-
-                    }
-                }
-                finally
-                {
-                    strResponse.Close();
-                    strLocal.Close();
+                    System.Diagnostics.Process.Start(fileName);
                 }
             }
         }
 
-        private void btnDescargar_Click(object sender, EventArgs e)
+        private bool ValidateURL()
         {
-            txtProgress.Text = "Descarga iniciada...";
-            thrDownload = new Thread(Download);
-            thrDownload.Start();
+            return !string.IsNullOrEmpty(txtURL.Text);
         }
 
-        private void btnDetener_Click(object sender, EventArgs e)
+        private void btnDownloader_Click(object sender, EventArgs e)
         {
-            webResponse.Close();
-            strResponse.Close();
-            strLocal.Close();
-            thrDownload.Abort();
-            progressBar.Value = 0;
-            txtProgress.Text = "Descarga detenida...";
+            if (ValidateURL())
+            {
+                SaveFileDialog dialog = new SaveFileDialog();
+                dialog.Filter = "Todos los archivos|*.*";
+                dialog.FileName = txtURL.Text.Substring(txtURL.Text.LastIndexOf("/") + 1);
+                if (dialog.ShowDialog() == DialogResult.OK)
+                {
+                    fileName = dialog.FileName;
+                    webClient.DownloadFileAsync(new Uri(txtURL.Text), fileName);
+                }
+            }
+            else
+                MessageBox.Show("Complete con alguna URL!");
         }
-        
+
+        private void btnCancel_Click(object sender, EventArgs e)
+        {
+            if (webClient != null)
+            {
+                webClient.CancelAsync();
+            }
+        }
     }
 }
